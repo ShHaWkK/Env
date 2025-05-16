@@ -1,4 +1,4 @@
-
+#!/bin/bash
 # Variables
 DEFAULT_SIZE="500M"
 CONTAINER="$HOME/env.img"
