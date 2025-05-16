@@ -26,3 +26,4 @@ Linux - Commande dd mesurer performances disque
 Sachez que vous pouvez remplacer « /dev/zero » par "/dev/random" ou "/dev/urandom" pour remplir un fichier avec des nombres aléatoires, plutôt que d'utiliser des valeurs nulles.
  ls -lAshi 
  
+losetup => permet d'afficher les loop de 0 à 10 
