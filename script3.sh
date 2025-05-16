@@ -115,7 +115,7 @@ open() {
           cryptsetup open --type luks1 --key-file=- "$CONTAINER" "$MAPPING"
         echo "[GOOD] mapping /dev/mapper/$MAPPING créé"
     else
-        echo "  • Volume déjà déverrouillé"
+        echo "Volume déjà déverrouillé"
     fi
     show_lsblk
 
@@ -124,7 +124,7 @@ open() {
         mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
         echo "[GOOD] Monté sur $MOUNT_POINT"
     else
-        echo "  • Déjà monté"
+        echo "Déjà monté"
     fi
     show_lsblk
 }
@@ -137,7 +137,7 @@ close() {
         umount "$MOUNT_POINT"
         echo "[GOOD] Démonté $MOUNT_POINT"
     else
-        echo "  • Rien à démonter"
+        echo "Rien à démonter"
     fi
     show_lsblk
 
@@ -145,7 +145,7 @@ close() {
         cryptsetup close "$MAPPING"
         echo "[GOOD] Verrouillé /dev/mapper/$MAPPING"
     else
-        echo "  • Volume déjà fermé"
+        echo "Volume déjà fermé"
     fi
     show_lsblk
 }
