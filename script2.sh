@@ -1,31 +1,32 @@
 #!/bin/bash
-# Variables
-DEFAULT_SIZE="500M"
-CONTAINER="$HOME/env.img"
-MAPPING="env_sec"
-# Point de montage 
-MOUNT_POINT="$HOME/env_sec_mount" 
 
-# Creation du fichier parent 
+set -euo pipefail
+export PATH="$PATH:/sbin:/usr/sbin"
+
+DEFAULT_SIZE="5G"
+CONTAINER="$HOME/env_sec.img"      
+MAPPING="env_sec"                 
+MOUNT_POINT="$HOME/env_sec_mount"   
+
 mkdir -p "$(dirname "$CONTAINER")"
 
-# install 
 install() {
-    
-    echo ">>> INSTALLATION DE  ENVIRRONNEMENT SECURISÉ  <<<"
+    echo ">>> INSTALL ENVIRONNEMENT <<<"
 
-    # Taille (défaut 500M)
+    # choix de la taille
     read -p "Taille du conteneur (ex: 5G, 500M) [${DEFAULT_SIZE}] : " size
     size=${size:-$DEFAULT_SIZE}
 
-    # Mot de passe LUKS
-    read -s -p "Mot de passe LUKS : " pass;   echo
-    read -s -p "Confirmer : " pass2;         echo
+    # mot de passe LUKS
+    read -s -p "Passphrase LUKS : " pass; echo
+    read -s -p "Confirmer : "       pass2; echo
     [[ "$pass" != "$pass2" ]] && { echo "[Erreur] mots de passe différents"; exit 1; }
+
+    # ne pas écraser
     [[ -f "$CONTAINER" ]] && { echo "[Erreur] $CONTAINER existe déjà"; exit 1; }
 
-    # création fichier
-    echo "Création du fichier $CONTAINER de taille $size..."
+    # 4) création du fichier
+    echo "Création de $CONTAINER de taille $size..."
     if command -v fallocate &>/dev/null; then
         fallocate -l "$size" "$CONTAINER"
     else
@@ -37,14 +38,13 @@ install() {
         dd if=/dev/zero of="$CONTAINER" bs=1M count="$count" status=progress
     fi
 
-
     # chiffrement LUKS
     echo "Initialisation LUKS (tapez YES en majuscules)…"
-    echo -n "$pass" | cryptsetup luksFormat "$CONTAINER" --key-file=-
+    cryptsetup luksFormat "$CONTAINER"
 
-    # ouverture pour formater
-    echo "Ouverture du volume…"
-    echo -n "$pass" | cryptsetup open "$CONTAINER" "$MAPPING" --key-file=-
+    # ouverture du volume
+    echo "Ouverture du volume chiffré…"
+    cryptsetup open "$CONTAINER" "$MAPPING"
 
     # format ext4
     echo "Formatage ext4…"
@@ -58,20 +58,19 @@ install() {
     echo "[GOOD] Installé et monté sur $MOUNT_POINT"
 }
 
-# open
 open() {
-    echo ">>> OPEN  DE L'ENVIRONNEMENT SECURISÉ <<<"
+    echo ">>> OPEN ENVIRONNEMENT <<<"
     [[ ! -f "$CONTAINER" ]] && { echo "[Erreur] pas de conteneur, lancez 'install'"; exit 1; }
 
     # déverrouillage si nécessaire
     if [[ ! -e /dev/mapper/"$MAPPING" ]]; then
         read -s -p "Passphrase LUKS : " pass; echo
-        echo -n "$pass" | cryptsetup open "$CONTAINER" "$MAPPING" --key-file=-
+        cryptsetup open "$CONTAINER" "$MAPPING"
     else
         echo "  • Volume déjà déverrouillé"
     fi
 
-    # Donc là si le montage si c'est nécessaire
+    # montage si besoin
     mkdir -p "$MOUNT_POINT"
     if ! mountpoint -q "$MOUNT_POINT"; then
         mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
@@ -81,16 +80,18 @@ open() {
     fi
 }
 
-# close
 close() {
-    echo ">>> CLOSE L'ENVIRONNMENT SECURISÉ  <<<"
+    echo ">>> CLOSE L'ENVIRONNEMENT  <<<"
+
+    # démontage si monté
     if mountpoint -q "$MOUNT_POINT"; then
         umount "$MOUNT_POINT"
-        echo "Démonté POUF "
+        echo "Démonté"
     else
         echo "Rien à démonter"
     fi
 
+    # verrouillage si ouvert
     if [[ -e /dev/mapper/"$MAPPING" ]]; then
         cryptsetup close "$MAPPING"
         echo "[GOOD] Verrouillé"
@@ -99,7 +100,6 @@ close() {
     fi
 }
 
-# Usage
 usage() {
     echo "Usage: $0 {install|open|close}"
     exit 1
@@ -112,4 +112,3 @@ case "$1" in
     close)   close   ;;
     *) usage ;;
 esac
-
