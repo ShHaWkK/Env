@@ -4,65 +4,82 @@ set -euo pipefail
 export PATH="$PATH:/sbin:/usr/sbin"
 
 DEFAULT_SIZE="5G"
-CONTAINER="$HOME/env_sec.img"      
-MAPPING="env_sec"                 
-MOUNT_POINT="$HOME/env_sec_mount"   
+CONTAINER="$HOME/env_sec.img"
+MAPPING="env_sec"
+MOUNT_POINT="$HOME/env_sec_mount"
 
+# Crée le dossier parent si besoin
 mkdir -p "$(dirname "$CONTAINER")"
 
-install() {
-    echo ">>> INSTALL ENVIRONNEMENT <<<"
+# Affiche l’état des block devices
+show_lsblk() {
+    echo
+    echo "===  LSBLK ==="
+    lsblk -o NAME,SIZE,TYPE,MOUNTPOINT | grep -E "(loop|mapper|${MAPPING}|$(basename $CONTAINER))" || lsblk -o NAME,SIZE,TYPE,MOUNTPOINT
+    echo "=============================="
+    echo
+}
 
-    # choix de la taille
+install() {
+    echo ">>> INSTALLATION ENVIRONNEMENT <<<"
+    show_lsblk
+
+    # 1) Choix de la taille
     read -p "Taille du conteneur (ex: 5G, 500M) [${DEFAULT_SIZE}] : " size
     size=${size:-$DEFAULT_SIZE}
 
-    # mot de passe LUKS
-    read -s -p "Password LUKS : " pass; echo
+    # 2) Mot de passe LUKS
+    read -s -p "Password LUKS : " pass;   echo
     read -s -p "Confirmer : "       pass2; echo
     [[ "$pass" != "$pass2" ]] && { echo "[Erreur] mots de passe différents"; exit 1; }
 
-    # ne pas écraser
+    # 3) Ne pas écraser existing file
     [[ -f "$CONTAINER" ]] && { echo "[Erreur] $CONTAINER existe déjà"; exit 1; }
 
-    # 4) création du fichier
+    # 4) Création du fichier
     echo "Création de $CONTAINER de taille $size..."
     if command -v fallocate &>/dev/null; then
         fallocate -l "$size" "$CONTAINER"
     else
         if [[ "$size" =~ [Gg]$ ]]; then
-            count=$(echo "${size%?}*1024" | bc)
+            cnt=$(echo "${size%?}*1024" | bc)
         else
-            count=${size%M}
+            cnt=${size%M}
         fi
-        dd if=/dev/zero of="$CONTAINER" bs=1M count="$count" status=progress
+        dd if=/dev/zero of="$CONTAINER" bs=1M count="$cnt" status=progress
     fi
 
-    # chiffrement LUKS
+    # 5) Chiffrement LUKS
     echo "Initialisation LUKS (tapez YES en majuscules)…"
     cryptsetup luksFormat "$CONTAINER"
 
-    # ouverture du volume
+    show_lsblk
+
+    # 6) Ouverture du volume
     echo "Ouverture du volume chiffré…"
     cryptsetup open "$CONTAINER" "$MAPPING"
 
-    # format ext4
+    show_lsblk
+
+    # 7) Format ext4
     echo "Formatage ext4…"
     mkfs.ext4 /dev/mapper/"$MAPPING"
 
-    # montage
+    # 8) Montage
     echo "Montage sur $MOUNT_POINT…"
     mkdir -p "$MOUNT_POINT"
     mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
 
+    show_lsblk
     echo "[GOOD] Installé et monté sur $MOUNT_POINT"
 }
 
 open() {
     echo ">>> OPEN ENVIRONNEMENT <<<"
+    show_lsblk
     [[ ! -f "$CONTAINER" ]] && { echo "[Erreur] pas de conteneur, lancez 'install'"; exit 1; }
 
-    # déverrouillage si nécessaire
+    # Déverrouillage si nécessaire
     if [[ ! -e /dev/mapper/"$MAPPING" ]]; then
         read -s -p "Password LUKS : " pass; echo
         cryptsetup open "$CONTAINER" "$MAPPING"
@@ -70,34 +87,42 @@ open() {
         echo "  • Volume déjà déverrouillé"
     fi
 
-    # montage si besoin
+    show_lsblk
+
+    # Montage si besoin
     mkdir -p "$MOUNT_POINT"
     if ! mountpoint -q "$MOUNT_POINT"; then
         mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
-        echo "[GOOD] Monté sur $MOUNT_POINT"
     else
-        echo "  • Déjà monté"
+        echo "Déjà monté"
     fi
+
+    show_lsblk
+    echo "[GOOD] Monté sur $MOUNT_POINT"
 }
 
 close() {
-    echo ">>> CLOSE L'ENVIRONNEMENT  <<<"
+    echo ">>> CLOSE ENVIRONNEMENT <<<"
+    show_lsblk
 
-    # démontage si monté
+    # Démontage si monté
     if mountpoint -q "$MOUNT_POINT"; then
         umount "$MOUNT_POINT"
-        echo "Démonté"
     else
         echo "Rien à démonter"
     fi
 
-    # verrouillage si ouvert
+    show_lsblk
+
+    # Verrouillage si ouvert
     if [[ -e /dev/mapper/"$MAPPING" ]]; then
         cryptsetup close "$MAPPING"
-        echo "[GOOD] Verrouillé"
     else
         echo "Déjà fermé"
     fi
+
+    show_lsblk
+    echo "[GOOD] Verrouillé et démonté"
 }
 
 usage() {
