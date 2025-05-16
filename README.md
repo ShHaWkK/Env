@@ -27,3 +27,5 @@ Sachez que vous pouvez remplacer « /dev/zero » par "/dev/random" ou "/dev/uran
  ls -lAshi 
  
 losetup => permet d'afficher les loop de 0 à 10 
+cryptsetup lucksClose crypt
+losetup -d /dev/lopp0
