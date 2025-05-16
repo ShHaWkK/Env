@@ -1,160 +1,136 @@
-#!/bin/bash
-# Author : ShHawk 
-# Sujet : Envirronnement Sécurisé
-
 set -euo pipefail
 export PATH="$PATH:/sbin:/usr/sbin"
 
-# Vérifications  
+# Vérifications globales
 (( EUID == 0 )) || { echo "[Erreur] exécuter en root"; exit 1; }
-for cmd in cryptsetup mkfs.ext4 mount umount fallocate dd lsblk df blkid; do
+for cmd in cryptsetup mkfs.ext4 mount umount fallocate dd losetup lsblk df blkid; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[Erreur] $cmd manquant"; exit 1; }
 done
 
-# variable 
+# Variables
 DEFAULT_SIZE="5G"
-CONTAINER="$HOME/environnement.img"
-MAPPING="environnement"
-MOUNT_POINT="$HOME/environnement_mount"
+CONTAINER="$HOME/env.img"
+LOOP_FILE="$HOME/env.loop"
+MAPPING="env_sec"
+MOUNT_POINT="$HOME/env_mount"
 
-# préparer dossiers
-CONTAINER_DIR="${CONTAINER%/*}"
-[[ -d "$CONTAINER_DIR" ]] || mkdir -p "$CONTAINER_DIR"
-[[ -d "$MOUNT_POINT" ]]    || mkdir -p "$MOUNT_POINT"
+# Prépare les dossiers
+mkdir -p "${CONTAINER%/*}" "$MOUNT_POINT"
 
-# Affichage de l’état des devices 
-show_lsblk() {
-  echo
-  echo "=== lsblk ==="
-  lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
-  echo
+# Affichages
+show_lsblk() { echo; lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT; echo; }
+show_df()    { df -Th | grep -E "$MAPPING|Filesystem"; echo; }
+show_blkid() { blkid /dev/mapper/"$MAPPING" 2>/dev/null || echo "(pas de mapping ouvert)"; echo; }
+
+# Utilitaires
+read_size_and_pass() {
+  read -p "Taille du conteneur (ex: 5G, 500M) [${DEFAULT_SIZE}] : " SIZE
+  SIZE=${SIZE:-$DEFAULT_SIZE}
+  read -s -p "Mot de passe LUKS : " PASS; echo
+  read -s -p "Confirmer le mot de passe : " PASS2; echo
+  [[ "$PASS" == "$PASS2" ]] || { echo "[Erreur] mots de passe différents"; exit 1; }
 }
 
-show_df() {
-  echo
-  echo "=== df -Th ==="
-  df -Th | grep -E "$MAPPING|Filesystem"
-  echo
+attach_loop() {
+  LOOPDEV=$(losetup --find --show "$CONTAINER")
+  echo "$LOOPDEV" >"$LOOP_FILE"
 }
 
-show_blkid() {
-  echo
-  echo "=== blkid /dev/mapper/$MAPPING ==="
-  blkid /dev/mapper/"$MAPPING" 2>/dev/null || echo "(pas de mapping ouvert)"
-  echo
+detach_loop() {
+  [[ -f "$LOOP_FILE" ]] && {
+    losetup -d "$(cat "$LOOP_FILE")"
+    rm -f "$LOOP_FILE"
+  }
 }
 
-#install
+unlock_volume() {
+  printf '%s' "$PASS" | cryptsetup open --type luks1 --key-file=- "$1" "$MAPPING"
+}
+
+lock_volume() {
+  cryptsetup close "$MAPPING"
+}
+
+format_volume() {
+  mkfs.ext4 /dev/mapper/"$MAPPING"
+}
+
+mount_volume() {
+  mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
+}
+
+umount_volume() {
+  umount "$MOUNT_POINT" 2>/dev/null || :
+}
+
+# Commandes
 install() {
-  echo ">>> INSTALL ENVIRONNEMENT <<<"
+  echo ">>> INSTALL environnement <<<"
   show_lsblk
 
-  read -p "Taille du conteneur (ex: 5G, 500M) [${DEFAULT_SIZE}] : " size
-  size=${size:-$DEFAULT_SIZE}
+  read_size_and_pass
+  [[ -f "$CONTAINER" ]] && { echo "[Erreur] conteneur existe"; exit 1; }
+  cryptsetup status "$MAPPING" &>/dev/null && { echo "[Erreur] mapping existe"; exit 1; }
 
-  read -s -p "Passphrase LUKS : " pass; echo
-  read -s -p "Confirmer la passphrase : " pass2; echo
-  [[ "$pass" != "$pass2" ]] && { echo "[Erreur] mots de passe différents"; exit 1; }
-
-  [[ -f "$CONTAINER" ]] && { echo "[Erreur] $CONTAINER existe déjà"; exit 1; }
-  cryptsetup status "$MAPPING" &>/dev/null && { echo "[Erreur] /dev/mapper/$MAPPING existe déjà"; exit 1; }
-
-  echo "Création de $CONTAINER de taille $size..."
-  if fallocate -l "$size" "$CONTAINER" 2>/dev/null; then :; else
-    if [[ "$size" =~ [Gg]$ ]]; then cnt=$(echo "${size%?}*1024" | bc); else cnt=${size%M}; fi
-    dd if=/dev/zero of="$CONTAINER" bs=1M count="$cnt" status=progress
+  # créer fichier
+  if ! fallocate -l "$SIZE" "$CONTAINER" 2>/dev/null; then
+    COUNT=${SIZE%[GgMm]}
+    [[ "$SIZE" =~ [Gg]$ ]] && COUNT=$((COUNT*1024))
+    dd if=/dev/zero of="$CONTAINER" bs=1M count="$COUNT" status=progress
   fi
   show_lsblk
 
-  echo "Initialisation LUKS (tapez YES)…"
-  printf '%s' "$pass" | cryptsetup luksFormat --type luks1 --batch-mode "$CONTAINER" --key-file=-
+  # boucle + LUKS
+  attach_loop; show_lsblk
+  printf '%s' "$PASS" | cryptsetup luksFormat --type luks1 --batch-mode "$LOOPDEV" --key-file=-
   show_lsblk
 
-  echo "Ouverture du volume…"
-  printf '%s' "$pass" | cryptsetup open --type luks1 --key-file=- "$CONTAINER" "$MAPPING"
-  show_lsblk
+  # déverrouille, formate, monte
+  unlock_volume "$LOOPDEV"; show_lsblk
+  format_volume; show_lsblk
+  mount_volume; show_lsblk; show_df; show_blkid
 
-  echo "Formatage ext4…"
-  mkfs.ext4 /dev/mapper/"$MAPPING"
-  show_lsblk
-
-  echo "Montage sur $MOUNT_POINT…"
-  mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
-  show_lsblk
-  show_df
-  show_blkid
-
-  echo "[GOOD] environnement installé et monté sur $MOUNT_POINT"
+  echo "[GOOD] env installé et monté sur $MOUNT_POINT"
 }
 
-# OPEN
 open() {
-  echo ">>> OPEN ENVIRONNEMENT <<<"
+  echo ">>> OPEN environnement <<<"
   show_lsblk
+  [[ ! -f "$CONTAINER" ]] && { echo "[Erreur] pas de conteneur"; exit 1; }
 
-  [[ ! -f "$CONTAINER" ]] && { echo "[Erreur] pas de conteneur, lancez 'install'"; exit 1; }
-
+  [[ -f "$LOOP_FILE" ]] || attach_loop
   if [[ ! -e /dev/mapper/"$MAPPING" ]]; then
-    read -s -p "Passphrase LUKS : " pass; echo
-    printf '%s' "$pass" | cryptsetup open --type luks1 --key-file=- "$CONTAINER" "$MAPPING"
-    echo "[GOOD] mapping /dev/mapper/$MAPPING créé"
+    read -s -p "Mot de passe LUKS : " PASS; echo
+    unlock_volume "$(cat "$LOOP_FILE")"
+    echo "[GOOD] mapping créé"
   else
-    echo "mapping déjà déverrouillé"
+    echo "mapping déjà ouvert"
   fi
   show_lsblk
 
   if ! mountpoint -q "$MOUNT_POINT"; then
-    mount /dev/mapper/"$MAPPING" "$MOUNT_POINT"
-    echo "[GOOD] monté sur $MOUNT_POINT"
+    mount_volume && echo "[GOOD] monté sur $MOUNT_POINT"
   else
     echo "point de montage déjà utilisé"
   fi
-  show_lsblk
-  show_df
+  show_lsblk; show_df
 }
 
-#close
 close() {
-  echo ">>> CLOSE ENVIRONNEMENT <<<"
+  echo ">>> CLOSE environnement <<<"
   show_lsblk
 
-  if mountpoint -q "$MOUNT_POINT"; then
-    umount "$MOUNT_POINT"
-    echo "[GOOD] démonté $MOUNT_POINT"
-  else
-    echo "rien à démonter"
-  fi
-  show_lsblk
-
-  if cryptsetup status "$MAPPING" &>/dev/null; then
-    cryptsetup close "$MAPPING"
-    echo "[GOOD] verrouillé /dev/mapper/$MAPPING"
-  else
-    echo "mapping déjà fermé"
-  fi
+  umount_volume && echo "[GOOD] démonté"
+  [[ -e /dev/mapper/"$MAPPING" ]] && (lock_volume && echo "[GOOD] verrouillé")
+  detach_loop && echo "[GOOD] loop détaché"
   show_lsblk
 }
 
-#delete
 delete() {
   echo ">>> DELETE environnement <<<"
-
-  # fermer si monté/open
-  close || true
-
-  # suppression du conteneur
-  if [[ -f "$CONTAINER" ]]; then
-    rm -f "$CONTAINER"
-    echo "[GOOD] supprimé $CONTAINER"
-  else
-    echo "pas de fichier conteneur à supprimer"
-  fi
-
-  # suppression du point de montage
-  if [[ -d "$MOUNT_POINT" ]]; then
-    rmdir "$MOUNT_POINT" 2>/dev/null && echo "[GOOD] supprimé $MOUNT_POINT" || echo "ne peut pas supprimer $MOUNT_POINT"
-  fi
-
+  close || :
+  [[ -f "$CONTAINER" ]] && rm -f "$CONTAINER" && echo "[GOOD] conteneur supprimé"
+  rmdir "$MOUNT_POINT" 2>/dev/null || :
   show_lsblk
 }
 
@@ -168,6 +144,6 @@ case "$1" in
   install) install ;;
   open)    open    ;;
   close)   close   ;;
-  delete)  delete  ;;
+  delete)  delete ;;
   *) usage ;;
 esac
