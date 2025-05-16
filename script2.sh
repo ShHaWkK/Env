@@ -18,7 +18,7 @@ install() {
     size=${size:-$DEFAULT_SIZE}
 
     # mot de passe LUKS
-    read -s -p "Passphrase LUKS : " pass; echo
+    read -s -p "Password LUKS : " pass; echo
     read -s -p "Confirmer : "       pass2; echo
     [[ "$pass" != "$pass2" ]] && { echo "[Erreur] mots de passe différents"; exit 1; }
 
@@ -64,7 +64,7 @@ open() {
 
     # déverrouillage si nécessaire
     if [[ ! -e /dev/mapper/"$MAPPING" ]]; then
-        read -s -p "Passphrase LUKS : " pass; echo
+        read -s -p "Password LUKS : " pass; echo
         cryptsetup open "$CONTAINER" "$MAPPING"
     else
         echo "  • Volume déjà déverrouillé"
