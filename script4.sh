@@ -5,7 +5,7 @@
 set -euo pipefail
 export PATH="$PATH:/sbin:/usr/sbin"
 
-# Vérifications globales
+# Vérifications
 (( EUID == 0 )) || { echo "[Erreur] exécuter en root"; exit 1; }
 for cmd in cryptsetup mkfs.ext4 mount umount fallocate dd losetup lsblk df blkid; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[Erreur] $cmd manquant"; exit 1; }
@@ -67,9 +67,11 @@ umount_volume() {
   umount "$MOUNT_POINT" 2>/dev/null || :
 }
 
+
+
 # Commandes
 install() {
-  echo ">>> INSTALL environnement <<<"
+  echo ">>> INSTALL ENVIRONNEMENT <<<"
   show_lsblk
 
   read_size_and_pass
@@ -98,7 +100,7 @@ install() {
 }
 
 open() {
-  echo ">>> OPEN environnement <<<"
+  echo ">>> OPEN ENVIRONNEMENT <<<"
   show_lsblk
   [[ ! -f "$CONTAINER" ]] && { echo "[Erreur] pas de conteneur"; exit 1; }
 
@@ -121,7 +123,7 @@ open() {
 }
 
 close() {
-  echo ">>> CLOSE environnement <<<"
+  echo ">>> CLOSE ENVIRONNEMENT <<<"
   show_lsblk
 
   umount_volume && echo "[GOOD] démonté"
@@ -131,7 +133,7 @@ close() {
 }
 
 delete() {
-  echo ">>> DELETE environnement <<<"
+  echo ">>> DELETE ENVIRONNEMENT <<<"
   close || :
   [[ -f "$CONTAINER" ]] && rm -f "$CONTAINER" && echo "[GOOD] conteneur supprimé"
   rmdir "$MOUNT_POINT" 2>/dev/null || :
