@@ -1,3 +1,7 @@
+#!/bin/bash
+# Author  : ShHawk alias Alexandre Uzan
+# Sujet : Environnement Sécurisé 
+
 set -euo pipefail
 export PATH="$PATH:/sbin:/usr/sbin"
 
